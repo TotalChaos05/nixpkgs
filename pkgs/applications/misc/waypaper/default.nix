@@ -24,6 +24,7 @@ python3.pkgs.buildPythonApplication rec {
 
   propagatedBuildInputs = with python3.pkgs; [
     pygobject3
+    killall
   ];
 
   # has no tests
