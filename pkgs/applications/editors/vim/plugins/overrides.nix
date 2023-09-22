@@ -11,6 +11,8 @@
 , substituteAll
 
   # Language dependencies
+, fetchYarnDeps
+, mkYarnModules
 , python3
 , rustPlatform
 
@@ -125,6 +127,7 @@
 
   # must be lua51Packages
 , luaPackages
+, luajitPackages
 }:
 
 self: super: {
@@ -516,7 +519,7 @@ self: super: {
     });
 
   fuzzy-nvim = super.fuzzy-nvim.overrideAttrs {
-    dependencies = with self; [ telescope-fzy-native-nvim ];
+    dependencies = with self; [ telescope-fzf-native-nvim ];
   };
 
   fzf-checkout-vim = super.fzf-checkout-vim.overrideAttrs {
@@ -598,6 +601,24 @@ self: super: {
 
     src = "${hurl.src}/contrib/vim";
 
+  };
+
+  image-nvim = super.image-nvim.overrideAttrs {
+    dependencies = with self; [
+      nvim-treesitter
+      nvim-treesitter-parsers.markdown_inline
+      nvim-treesitter-parsers.norg
+    ];
+
+    # Add magick to package.path
+    patches = [ ./patches/image-nvim/magick.patch ];
+
+    postPatch = ''
+      substituteInPlace lua/image/magick.lua \
+        --replace @nix_magick@ ${luajitPackages.magick}
+    '';
+
+    nvimRequireCheck = "image";
   };
 
   jedi-vim = super.jedi-vim.overrideAttrs {
@@ -711,8 +732,14 @@ self: super: {
 
   markdown-preview-nvim =  let
     # We only need its dependencies `node-modules`.
-    nodeDep = nodePackages."markdown-preview-nvim-../../applications/editors/vim/plugins/markdown-preview-nvim".overrideAttrs {
-      dontNpmInstall = true;
+    nodeDep = mkYarnModules rec {
+      inherit (super.markdown-preview-nvim) pname version;
+      packageJSON = ./markdown-preview-nvim/package.json;
+      yarnLock = "${super.markdown-preview-nvim.src}/yarn.lock";
+      offlineCache = fetchYarnDeps {
+        inherit yarnLock;
+        hash = "sha256-kzc9jm6d9PJ07yiWfIOwqxOTAAydTpaLXVK6sEWM8gg=";
+      };
     };
   in super.markdown-preview-nvim.overrideAttrs {
     patches = [
@@ -722,7 +749,7 @@ self: super: {
       })
     ];
     postInstall = ''
-      ln -s ${nodeDep}/lib/node_modules/markdown-preview/node_modules $out/app
+      ln -s ${nodeDep}/node_modules $out/app
     '';
 
     nativeBuildInputs = [ nodejs ];
@@ -768,6 +795,10 @@ self: super: {
       sha256 = "1db5az5civ2bnqg7v3g937mn150ys52258c3glpvdvyyasxb4iih";
     };
     meta.homepage = "https://github.com/jose-elias-alvarez/minsnip.nvim/";
+  };
+
+  multicursors-nvim = super.multicursors-nvim.overrideAttrs {
+    dependencies = with self; [ nvim-treesitter hydra-nvim ];
   };
 
   ncm2 = super.ncm2.overrideAttrs {
@@ -947,7 +978,7 @@ self: super: {
         pname = "sg-nvim-rust";
         inherit (old) version src;
 
-        cargoHash = "sha256-MJUEGzV756zWCHGAcdm9uU8DpoX6b1G8C2bRWy4QCfE=";
+        cargoHash = "sha256-JwEOfxGH2wiFkdepxBsUYrpQ2kMV6koqpkD7s+gbWw8=";
 
         nativeBuildInputs = [ pkg-config ];
 
@@ -1397,7 +1428,7 @@ self: super: {
         hexokinase = buildGoModule {
           name = "hexokinase";
           src = old.src + "/hexokinase";
-          vendorSha256 = null;
+          vendorHash = null;
         };
       in
       ''
@@ -1438,6 +1469,14 @@ self: super: {
 
   vim-metamath = super.vim-metamath.overrideAttrs {
     preInstall = "cd vim";
+  };
+
+  vim-pluto = super.vim-pluto.overrideAttrs {
+    dependencies = with self; [ denops-vim ];
+  };
+
+  vim-sensible = super.vim-sensible.overrideAttrs {
+    patches = [ ./patches/vim-sensible/fix-nix-store-path-regex.patch ];
   };
 
   vim-snipmate = super.vim-snipmate.overrideAttrs {
@@ -1594,6 +1633,17 @@ self: super: {
         --replace "'zoxide_executable', 'zoxide'" "'zoxide_executable', '${zoxide}/bin/zoxide'"
     '';
   };
+  LeaderF = super.LeaderF.overrideAttrs {
+    buildInputs = [ python3 ];
+    # rm */build/ to prevent dependencies on gcc
+    # strip the *.so to keep files small
+    buildPhase = ''
+      patchShebangs .
+      ./install.sh
+      rm autoload/leaderf/fuzzyMatch_C/build/ -r
+    '';
+    stripDebugList = [ "autoload/leaderf/python" ];
+  };
 
 } // (
   let
@@ -1612,7 +1662,6 @@ self: super: {
       "coc-haxe"
       "coc-highlight"
       "coc-html"
-      "coc-imselect"
       "coc-java"
       "coc-jest"
       "coc-json"
